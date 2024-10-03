@@ -293,43 +293,73 @@ def generate_conversation():
         assistant_response = f"네, {future_date} {future_time}에 {participant}과(와) {event}을(를) 등록했습니다."
         conversation.add_message("assistant", assistant_response)
 
-    # Step 2: Random follow-up action
-    next_action = random.choice(["add_event", "modify_event"])
+    # Step 2: Add more interactions
+    for _ in range(random.randint(1, 3)):  # Add between 1 to 3 more interactions
+        next_action = random.choice(["add_event", "modify_event"])
 
-    if next_action == "add_event":
-        # User adds another event
-        new_future_date = random_future_date()
-        new_future_time = random_future_time()
-        new_participant = random.choice(participants)
-        new_event = random.choice(events)
-        new_event_request = f"{new_participant} {new_event}를 {new_future_date} {new_future_time}에 {random.choice(actions)}."
-        conversation.add_message("user", new_event_request)
-        
-        # Check for conflict again
-        has_conflict, conflicting_event = conversation.check_conflict(new_future_date, new_future_time)
-        if has_conflict:
-            assistant_response = f"그 시간에는 {conflicting_event['participant']}과(와) {conflicting_event['event']}이(가) 이미 예정되어 있습니다. 일정을 조정하시겠습니까?"
-            conversation.add_message("assistant", assistant_response)
-            # User decides to cancel the new event
-            cancel_request = "아니요, 다른 시간에 예약하겠습니다."
-            conversation.add_message("user", cancel_request)
-            assistant_response = "네, 해당 일정을 취소했습니다."
-            conversation.add_message("assistant", assistant_response)
-        else:
-            conversation.add_schedule(new_participant, new_event, new_future_date, new_future_time)
-            assistant_response = f"네, {new_future_date} {new_future_time}에 {new_participant}과(와) {new_event}을(를) 추가했습니다."
-            conversation.add_message("assistant", assistant_response)
+        if next_action == "add_event":
+            # User adds another event
+            new_future_date = random_future_date()
+            new_future_time = random_future_time()
+            new_participant = random.choice(participants)
+            new_event = random.choice(events)
+            new_event_request = f"{new_participant} {new_event}를 {new_future_date} {new_future_time}에 {random.choice(actions)}."
+            conversation.add_message("user", new_event_request)
+            
+            # Check for conflict again
+            has_conflict, conflicting_event = conversation.check_conflict(new_future_date, new_future_time)
+            if has_conflict:
+                assistant_response = f"그 시간에는 {conflicting_event['participant']}과(와) {conflicting_event['event']}이(가) 이미 예정되어 있습니다. 일정을 조정하시겠습니까?"
+                conversation.add_message("assistant", assistant_response)
+                # User decides to cancel or reschedule
+                user_decision = random.choice(["cancel", "reschedule"])
+                if user_decision == "cancel":
+                    cancel_request = "아니요, 다른 시간에 예약하겠습니다."
+                    conversation.add_message("user", cancel_request)
+                    assistant_response = "네, 해당 일정을 취소했습니다."
+                    conversation.add_message("assistant", assistant_response)
+                else:
+                    new_reschedule_time = random_future_time()
+                    reschedule_request = f"네, 이전 일정을 {new_reschedule_time}로 변경해 주세요."
+                    conversation.add_message("user", reschedule_request)
+                    conversation.add_schedule(new_participant, new_event, new_future_date, new_reschedule_time)
+                    reschedule_response = f"네, {new_future_date} {new_reschedule_time}로 일정을 변경했습니다."
+                    conversation.add_message("assistant", reschedule_response)
+            else:
+                conversation.add_schedule(new_participant, new_event, new_future_date, new_future_time)
+                assistant_response = f"네, {new_future_date} {new_future_time}에 {new_participant}과(와) {new_event}을(를) 추가했습니다."
+                conversation.add_message("assistant", assistant_response)
 
-    elif next_action == "modify_event":
-        # User modifies an existing event
-        if conversation.schedules:
-            event_to_modify = random.choice(conversation.schedules)
-            modify_request = f"{event_to_modify['participant']}과(와) {event_to_modify['event']}의 일정을 변경해 주세요."
-            conversation.add_message("user", modify_request)
-            new_time = random_future_time()
-            conversation.add_schedule(event_to_modify['participant'], event_to_modify['event'], event_to_modify['date'], new_time)
-            reschedule_response = f"네, {event_to_modify['date']} {new_time}로 일정을 변경했습니다."
-            conversation.add_message("assistant", reschedule_response)
+        elif next_action == "modify_event":
+            # User modifies an existing event
+            if conversation.schedules:
+                event_to_modify = random.choice(conversation.schedules)
+                modify_request = f"{event_to_modify['participant']}과(와) {event_to_modify['event']}의 일정을 변경해 주세요."
+                conversation.add_message("user", modify_request)
+                new_time = random_future_time()
+
+                # Check for conflict before modifying
+                has_conflict, conflicting_event = conversation.check_conflict(event_to_modify['date'], new_time)
+                if has_conflict:
+                    assistant_response = f"그 시간에는 {conflicting_event['participant']}과(와) {conflicting_event['event']}이(가) 이미 예정되어 있습니다. 다른 시간으로 변경하시겠습니까?"
+                    conversation.add_message("assistant", assistant_response)
+                    user_decision = random.choice(["cancel", "reschedule"])
+                    if user_decision == "cancel":
+                        cancel_request = "아니요, 다른 시간에 예약하겠습니다."
+                        conversation.add_message("user", cancel_request)
+                        assistant_response = "네, 해당 일정을 취소했습니다."
+                        conversation.add_message("assistant", assistant_response)
+                    else:
+                        new_reschedule_time = random_future_time()
+                        reschedule_request = f"네, {event_to_modify['date']} {new_reschedule_time}로 변경해 주세요."
+                        conversation.add_message("user", reschedule_request)
+                        conversation.add_schedule(event_to_modify['participant'], event_to_modify['event'], event_to_modify['date'], new_reschedule_time)
+                        reschedule_response = f"네, {event_to_modify['date']} {new_reschedule_time}로 일정을 변경했습니다."
+                        conversation.add_message("assistant", reschedule_response)
+                else:
+                    conversation.add_schedule(event_to_modify['participant'], event_to_modify['event'], event_to_modify['date'], new_time)
+                    reschedule_response = f"네, {event_to_modify['date']} {new_time}로 일정을 변경했습니다."
+                    conversation.add_message("assistant", reschedule_response)
     
     return {"conversation": conversation.messages}
 

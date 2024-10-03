@@ -123,30 +123,52 @@ early_stopping_callback = EarlyStoppingCallback(
     early_stopping_patience=5  # Stop training if no improvement for 5 evaluations
 )
 
+# trainer = SFTTrainer(
+#     model=model,
+#     train_dataset=train_dataset,
+#     eval_dataset=val_dataset,
+#     max_seq_length=512,
+#     args=TrainingArguments(
+#         output_dir="./finetuned_gemma_4bit",
+#         max_steps=20,  # Number of training steps
+#         per_device_train_batch_size=1,  # Adjust according to your GPU memory
+#         gradient_accumulation_steps=8,  # Gradient accumulation to handle small batch sizes
+#         optim="paged_adamw_8bit",  # Optimizer for 4-bit
+#         warmup_steps=10,
+#         learning_rate=2e-4,
+#         fp16=True,  # Mixed precision for faster training
+#         evaluation_strategy="steps",  # Evaluate the model every `eval_steps`
+#         eval_steps=20,  # Evaluation frequency (adjust based on dataset size)
+#         logging_steps=5,
+#         push_to_hub=False,
+#         report_to='none',
+#         save_total_limit=3,  # Limit number of checkpoints to save
+#         load_best_model_at_end=True,
+#     ),
+#     peft_config=lora_config,
+#     callbacks=[time_limit_callback, early_stopping_callback],
+# )
+
 trainer = SFTTrainer(
     model=model,
     train_dataset=train_dataset,
-    eval_dataset=val_dataset,
     max_seq_length=512,
     args=TrainingArguments(
         output_dir="./finetuned_gemma_4bit",
-        max_steps=1000,  # Number of training steps
+        max_steps=50,  # Number of training steps
         per_device_train_batch_size=1,  # Adjust according to your GPU memory
         gradient_accumulation_steps=8,  # Gradient accumulation to handle small batch sizes
         optim="paged_adamw_8bit",  # Optimizer for 4-bit
-        warmup_steps=30,
+        warmup_steps=30,  # Adjusted for fewer steps
         learning_rate=2e-4,
         fp16=True,  # Mixed precision for faster training
-        evaluation_strategy="steps",  # Evaluate the model every `eval_steps`
-        eval_steps=50,  # Evaluation frequency (adjust based on dataset size)
-        logging_steps=10,
+        logging_steps=5,  # Log more frequently due to reduced steps
         push_to_hub=False,
         report_to='none',
         save_total_limit=3,  # Limit number of checkpoints to save
-        load_best_model_at_end=True,
     ),
     peft_config=lora_config,
-    callbacks=[time_limit_callback, early_stopping_callback],
+    callbacks=[time_limit_callback],
 )
 
 # Step 10: Fine-Tuning the Model

@@ -1,13 +1,7 @@
-import sys
-import os
 import torch
 import gradio as gr
-
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-)
+import logging
+from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
 
 # Step 1: Define device
@@ -15,11 +9,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"We are using: {device}")
 
 # Step 2: Load the Tokenizer
-tokenizer_path = './model'  # Adjust this path
+tokenizer_path = './model'  # Update this to your model path
 tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 print("Tokenizer Loaded")
 
-# Add special tokens if not already present
+# Add special tokens if they are not already present
 special_tokens = {
     "bos_token": "<bos>",
     "eos_token": "<eos>",
@@ -30,103 +24,72 @@ tokenizer.add_special_tokens(special_tokens)
 
 # Step 3: Load the Model with 4-bit Quantization
 adapter_path = "./finetuned_gemma_4bit/lora_adapter"
-model_path = './model'  # Adjust this path
+model_path = './model'
 
 quantization_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_compute_dtype=torch.float16,
     bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
+    bnb_4bit_quant_type="nf4"
 )
 
 model = AutoModelForCausalLM.from_pretrained(
     model_path,
-    device_map="auto",
+    device_map="auto",  # Automatically maps the model to the appropriate device
     quantization_config=quantization_config,
-    offload_buffers=True  # Added to handle memory warning
+    offload_buffers=True
 )
 
+# Load LoRA adapter
 model = PeftModel.from_pretrained(model, adapter_path)
-
-# Resize model embeddings if tokenizer was updated
 model.resize_token_embeddings(len(tokenizer))
 
 print("Finetuned Gemma Model Loaded")
 
-# Ensure tokenizer has pad_token_id
+# Ensure the tokenizer has a pad_token_id
 if not hasattr(tokenizer, 'pad_token_id') or tokenizer.pad_token_id is None:
     tokenizer.pad_token_id = tokenizer.eos_token_id
     print('pad_token_id set to eos_token_id')
 
-# Format the conversation manually with schedule summarization
-def format_conversation(conversation, schedules_summary=""):
+# Step 4: Create a pipeline for generation without specifying `device`
+text_generation_pipeline = pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    max_new_tokens=150,
+    temperature=0.9,
+    top_p=0.85,
+    top_k=50,
+    do_sample=True  # Enable sampling
+)
+
+# Function to format the conversation with apply_chat_template
+def format_prompt(conversation):
     """
-    Format the conversation into a string suitable for model input.
+    Format the conversation using the tokenizer's apply_chat_template method.
     """
-    formatted_conversation = "<bos>\n"
-    # Add system summary, if any
-    if schedules_summary:
-        formatted_conversation += f"<start_of_turn>assistant\n{str(schedules_summary)}<end_of_turn>\n"
-        
-    # Add each message in the conversation
+    messages = []
     for turn in conversation:
-        role = turn['role']
-        content = turn['content']
-        formatted_conversation += f"<start_of_turn>{role}\n{content}<end_of_turn>\n"
+        messages.append({"role": turn["role"], "content": turn["content"]})
     
-    # Add the current assistant response start token
-    formatted_conversation += "<start_of_turn>assistant\n"
-    return formatted_conversation
+    # Use the apply_chat_template method to format the conversation
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    logging.debug("Formatted Prompt:\n" + prompt)
+    return prompt
 
-# Generate text function using the formatted conversation
-def generate_text(model, tokenizer, conversation, device, max_new_tokens=150, temperature=0.9, top_p=0.85, top_k=50):
-    # Prepare the conversation history
-    previous_schedules = [turn['content'] for turn in conversation if turn['role'] == 'user']
-    
-    # Generate schedule summary if multiple schedules exist
-    schedules_summary = ""
-    if len(previous_schedules) > 1:
-        # Generate the schedule summary
-        schedules_summary = "이전에 말씀하신 일정은 다음과 같습니다:\n" + "\n".join(
-            f"- {schedule}" for schedule in previous_schedules[:-1]
-        )
+# Function to generate text from formatted conversation
+def generate_text(conversation):
+    # Format the conversation using apply_chat_template
+    prompt = format_prompt(conversation)
 
-    # Format the conversation prompt with summary
-    prompt = format_conversation(conversation, schedules_summary=schedules_summary)
-    
-    # Tokenize and move input to the correct device
-    input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
+    # Generate output using the pipeline
+    outputs = text_generation_pipeline(prompt)
 
-    # Generate output using the model's generate method
-    generated_ids = model.generate(
-        input_ids=input_ids,
-        max_new_tokens=max_new_tokens,  # Use max_new_tokens instead of max_length
-        temperature=temperature,
-        top_p=top_p,
-        top_k=top_k,
-        do_sample=True,
-        pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-    )
-    
-    # Decode and clean the generated output
-    generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=False)
-    
-    # Extract the assistant's reply between <start_of_turn>assistant and <end_of_turn>
-    start_token = "<start_of_turn>assistant\n"
-    end_token = "<end_of_turn>"
-    start_index = generated_text.find(start_token)
-    if start_index != -1:
-        start_index += len(start_token)
-        end_index = generated_text.find(end_token, start_index)
-        if end_index != -1:
-            assistant_reply = generated_text[start_index:end_index].strip()
-        else:
-            assistant_reply = generated_text[start_index:].strip()
-    else:
-        assistant_reply = generated_text.strip()
-    
-    return assistant_reply
+    # Extract and log generated output
+    generated_text = outputs[0]["generated_text"][len(prompt):].strip()
+    logging.debug("Generated Text:\n" + generated_text)
+
+    return generated_text
 
 # Initialize conversation history
 conversation_history = []
@@ -137,14 +100,15 @@ def respond(user_input, chat_history):
     conversation_history.append({'role': 'user', 'content': user_input})
     
     # Generate the assistant's response
-    assistant_response = generate_text(model, tokenizer, conversation_history, device)
+    assistant_response = generate_text(conversation_history)
     
-    # Append the assistant's response to conversation and chat history
+    # Append the assistant's response to conversation history and chat history
     conversation_history.append({'role': 'assistant', 'content': assistant_response})
     chat_history.append((user_input, assistant_response))
     
     return "", chat_history
 
+# Set up Gradio UI
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# 📅 당신의 일정 관리 AI 비서")
     gr.Markdown("당신의 일정을 말씀해주신다면, 제가 관리해드릴게요!")
